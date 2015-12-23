@@ -21,7 +21,8 @@
 
 (eval-when-compile
   (require 'cl)
-  (require 'ensime-macros))
+  (require 'ensime-macros)
+  (require 'diff-mode))
 
 (defvar ensime-refactor-id-counter 0
   "Each refactoring is given a unique id.")
@@ -205,6 +206,136 @@
 	(insert "Nothing to be done.")
       (ensime-insert-change-list changes))))
 
+(defun ensime-preview-refactor-rename (&optional new-name)
+  "Rename a symbol, project-wide."
+  (interactive)
+  (let ((sym (ensime-sym-at-point)))
+    (if sym
+        (let* ((start (plist-get sym :start))
+               (end (plist-get sym :end))
+               (old-name (plist-get sym :name))
+               (name (or new-name
+                         (read-string (format "Rename '%s' to: " old-name)))))
+          (ensime-preview-refactor
+           'rename
+           `(file ,buffer-file-name
+                  start ,(ensime-externalize-offset start)
+                  end ,(ensime-externalize-offset end)
+                  newName ,name)))
+      (message "Please place cursor on a symbol."))))
+
+(defun ensime-preview-refactor-organize-imports ()
+  "Do a syntactic organization of the imports in the current buffer."
+  (interactive)
+  (cond ((ensime-visiting-java-file-p)
+         (ensime-refactor-organize-java-imports)
+         (message "Organized."))
+        (t
+         (ensime-preview-refactor
+          'organizeImports
+          `(file ,buffer-file-name)))))
+
+(defun ensime-preview-refactor-extract-local ()
+  "Extract a range of code into a val."
+  (interactive)
+  (let ((name (read-string "Name of local value: ")))
+    (destructuring-bind (start end)
+        (ensime-computed-range)
+      (ensime-preview-refactor
+       'extractLocal
+       `(file ,buffer-file-name
+              start ,start
+              end ,end
+              name ,name)))))
+
+(defun ensime-preview-refactor-extract-method ()
+  "Extract a range of code into a method."
+  (interactive)
+  (let ((name (read-string "Name of method: ")))
+    (destructuring-bind (start end)
+        (ensime-computed-range)
+      (ensime-preview-refactor
+       'extractMethod
+       `(file ,buffer-file-name
+              start ,start
+              end ,end
+              methodName ,name)))))
+
+(defun ensime-preview-refactor-inline-local ()
+  "Get rid of an intermediate variable."
+  (interactive)
+  (let ((sym (ensime-sym-at-point)))
+    (if sym
+        (let* ((start (plist-get sym :start))
+               (end (plist-get sym :end)))
+          (ensime-preview-refactor
+           'inlineLocal
+           `(file ,buffer-file-name
+                  start ,(ensime-externalize-offset start)
+                  end ,(ensime-externalize-offset end))))
+      (message "Please place cursor on a local value."))))
+
+(defun ensime-preview-refactor (refactor-type params &optional non-interactive blocking)
+  (if (buffer-modified-p) (ensime-write-buffer nil t))
+  (incf ensime-refactor-id-counter)
+  (if (not blocking) (message "Please wait..."))
+  (ensime-rpc-preview-refactor
+   ensime-refactor-id-counter
+   params
+   non-interactive
+   'ensime-preview-refactor-handler
+   blocking))
+
+(defun ensime-preview-refactor-handler (result)
+  (let ((refactor-type (plist-get result :refactor-type))
+        (id (plist-get result :procedure-id))
+        (diff (plist-get result :diff)))
+    (if  (ensime-preview-refactor-auto-apply-p refactor-type diff)
+        (ensime-with-popup-buffer (ensime-refactor-info-buffer-name
+                                   nil nil 'diff-mode)
+                                  (insert-file-contents diff)
+                                  (ensime-preview-refactor-apply-all-hunks)
+                                  (ensime-preview-refactor-save-all-diff-source-buffers))
+      (ensime-with-popup-buffer (ensime-refactor-info-buffer-name
+                                 nil t 'diff-mode)
+                                (insert-file-contents diff)))
+    (delete-file diff)
+    (ensime-event-sig :refactor-preview-done diff)))
+
+(defun ensime-preview-refactor-auto-apply-p (refactor-type diff)
+  "Check if refactor changes should be applied automatically"
+  (or (memq refactor-type ensime-refactor-auto-apply-types)
+      (with-temp-buffer
+        (insert-file-contents diff)
+        (goto-char (point-min))
+        (or (re-search-forward diff-file-header-re nil t
+                               ensime-refactor-auto-apply-file-limit)
+            (progn (goto-char (point-min))
+                   (re-search-forward diff-hunk-header-re nil t
+                                      ensime-refactor-auto-apply-hunk-limit))))))
+
+(defun ensime-preview-refactor-apply-all-hunks ()
+  "Apply or undo all hunks in the *ENSIME-Refactoring* buffer."
+  (interactive)
+  (make-local-variable 'diff-advance-after-apply-hunk)
+  (setq diff-advance-after-apply-hunk nil)
+  (goto-char (point-min))
+  (while (re-search-forward diff-hunk-header-re nil t)
+    (diff-apply-hunk)))
+
+(defun ensime-preview-refactor-save-all-diff-source-buffers ()
+  "Save all source buffers in the *ENSIME-Refactoring* buffer.
+Do not asks user about each one if
+`ensime-refactor-save-with-no-questions' is t."
+  (interactive)
+  (goto-char (point-min))
+  (while (re-search-forward diff-file-header-re nil t)
+    (-when-let (src-buffer-name (buffer-name (car (diff-find-source-location))))
+      (save-some-buffers
+       ensime-refactor-save-with-no-questions
+       (-partial (lambda (src-buffer-name)
+                   (equal src-buffer-name (buffer-name)))
+                 src-buffer-name)))))
 
 
 (provide 'ensime-refactor)

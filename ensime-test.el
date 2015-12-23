@@ -1540,6 +1540,40 @@
 		     (ensime-test-cleanup proj))))
 
    (ensime-async-test
+    "Test organize imports diff refactoring: remove unused import."
+    (let* ((proj (ensime-create-tmp-project
+                  `((:name
+                     "hello_world.scala"
+                     :contents ,(ensime-test-concat-lines
+                                 "package com.helloworld"
+                                 "import scala.collection.immutable.Vector"
+                                 "class HelloWorld{"
+                                 "}"
+                                 ""))))))
+      (ensime-test-init-proj proj))
+
+    ((:connected))
+    ((:compiler-ready :full-typecheck-finished)
+     (ensime-test-with-proj
+      (proj src-files)
+      (setq ensime-refactor-auto-apply-types '(rename))
+      (setq ensime-refactor-auto-apply-file-limit 0)
+      (setq ensime-refactor-auto-apply-hunk-limit 0)
+      (ensime-preview-refactor-organize-imports)))
+    (:refactor-preview-done diff t
+                            (ensime-test-with-proj
+                             (proj src-files)
+                             (find-file (car src-files))
+                             (let ((src (buffer-substring-no-properties
+                                         (point-min) (point-max))))
+                               (ensime-assert-equal src (ensime-test-concat-lines
+                                                         "package com.helloworld"
+                                                         "class HelloWorld{"
+                                                         "}"
+                                                         "")))
+                             (ensime-test-cleanup proj))))
+
+   (ensime-async-test
     "Test rename refactoring over multiple files."
     (let* ((proj (ensime-create-tmp-project
                   `((:name
@@ -1604,6 +1638,68 @@
       (ensime-assert (null (ensime-all-notes)))
       (ensime-test-cleanup proj))))
 
+   (ensime-async-test
+    "Test rename diff refactoring over multiple files."
+    (let* ((proj (ensime-create-tmp-project
+                  `((:name
+                     "hello_world.scala"
+                     :contents ,(ensime-test-concat-lines
+                                 "package com.helloworld"
+                                 "class /*1*/HelloWorld{"
+                                 "}"
+                                 ""))
+                    (:name
+                     "another.scala"
+                     :contents ,(ensime-test-concat-lines
+                                 "package com.helloworld"
+                                 "object Another {"
+                                 "def main(args:Array[String]) {"
+                                 "val a = new HelloWorld()"
+                                 "}"
+                                 "}"
+                                 ""))))))
+      (ensime-test-init-proj proj))
+    ((:connected))
+    ((:compiler-ready :full-typecheck-finished)
+     (ensime-test-with-proj
+      (proj src-files)
+      ;; refactor-rename needs all files to be typechecked
+      (ensime-typecheck-all)))
+
+    ((:full-typecheck-finished)
+     (ensime-test-with-proj
+      (proj src-files)
+      (ensime-assert (null (ensime-all-notes))))
+     (setq ensime-refactor-auto-apply-types '(rename))
+     (setq ensime-refactor-auto-apply-file-limit 0)
+     (setq ensime-refactor-auto-apply-hunk-limit 0)
+     (goto-char (ensime-test-after-label "1"))
+     (forward-char)
+     (ensime-preview-refactor-rename "DudeFace"))
+
+    (:refactor-preview-done diff t
+                            (ensime-test-with-proj
+                             (proj src-files)
+                             (find-file (car src-files))
+                             (let ((src (buffer-substring-no-properties
+                                         (point-min) (point-max))))
+                               (ensime-assert-equal src (ensime-test-concat-lines
+                                                         "package com.helloworld"
+                                                         "class /*1*/DudeFace{"
+                                                         "}"
+                                                         "")))
+                             (find-file (car (cdr src-files)))
+                             (let ((src (buffer-substring-no-properties
+                                         (point-min) (point-max))))
+                               (ensime-assert-equal src (ensime-test-concat-lines
+                                                         "package com.helloworld"
+                                                         "object Another {"
+                                                         "def main(args:Array[String]) {"
+                                                         "val a = new DudeFace()"
+                                                         "}"
+                                                         "}"
+                                                         "")))
+                             (ensime-test-cleanup proj))))
    (ensime-async-test
     "Test find-references."
     (let* ((proj (ensime-create-tmp-project

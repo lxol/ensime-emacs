@@ -1072,6 +1072,16 @@ copies. All other objects are used unchanged. List must not contain cycles."
      `(swank:prepare-refactor
        ,proc-id ,refactor-type ,params ,(not non-interactive)) continue)))
 
+(defun ensime-rpc-preview-refactor
+    (proc-id params non-interactive continue blocking)
+  (if blocking
+      (ensime-eval
+       `(swank:diff-refactor
+         ,proc-id ,params ,(not non-interactive)))
+    (ensime-eval-async
+     `(swank:diff-refactor
+       ,proc-id, params ,(not non-interactive)) continue)))
+
 (defun ensime-rpc-refactor-exec (proc-id refactor-type continue)
   (ensime-eval-async `(swank:exec-refactor ,proc-id , refactor-type) continue))
 
@@ -1088,7 +1098,7 @@ copies. All other objects are used unchanged. List must not contain cycles."
 		     continue))
 
 (defun ensime-rpc-async-symbol-designations-for-buffer (start end requested-types continue)
-  (let ((file (cond ((version<= "0.8.18" (ensime-protocol-version))
+  (let ((file (cond ((version<= "0.8.19" (ensime-protocol-version))
 		     (ensime-src-info-for-current-buffer))
 		    (t buffer-file-name))))
     (ensime-eval-async `(swank:symbol-designations ,file ,start ,end ,requested-types)
