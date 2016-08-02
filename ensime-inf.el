@@ -242,6 +242,19 @@ the current project's dependencies. Returns list of form (cmd [arg]*)"
       (comint-send-string nil "\n")
       (comint-send-eof))))
 
+(defun ensime-inf-eval-result ()
+  "Get REPL evaluation result."
+  (with-current-buffer ensime-inf-buffer-name
+    (save-excursion
+      (goto-char (point-max))
+      (next-line -1)
+      (end-of-line)
+      (let ((end (point)))
+        (search-backward "Exiting paste mode, now interpreting.")
+        (next-line)
+        (beginning-of-line)
+        (buffer-substring-no-properties (point) end)))))
+
 (defun ensime-inf-eval-definition ()
   "Send the current 'definition' to the Scala interpreter.
 
