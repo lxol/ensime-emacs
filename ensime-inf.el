@@ -55,6 +55,7 @@
   (require 'cl)
   (require 'ensime-macros))
 
+(require 'ensime-overlay)
 (require 'comint)
 
 (defgroup ensime-inf nil
@@ -94,6 +95,7 @@ Used for determining the default in the next one.")
        '(ansi-color-process-output
          comint-postoutput-scroll-to-bottom
          ensime-inf-postoutput-filter))
+  (setq ensime-inf-overlay-marker nil)
 
   (if ensime-inf-ansi-support
       (set (make-local-variable 'ansi-color-for-comint-mode) t)
@@ -129,7 +131,7 @@ Used for determining the default in the next one.")
     (cd root-path)
     (ensime-assert-executable-on-path (car cmd-and-args))
     (comint-exec (current-buffer)
-         ensime-inf-buffer-name
+                 ensime-inf-buffer-name
 		 (car cmd-and-args)
 		 nil
 		 (cdr cmd-and-args))
@@ -235,8 +237,11 @@ the current project's dependencies. Returns list of form (cmd [arg]*)"
   (interactive "r")
   (ensime-inf-assert-running)
 
-  (let ((reg (buffer-substring-no-properties start end)))
+  (let ((reg (buffer-substring-no-properties start end))
+        (buffer (buffer-name)))
+    (setq ensime-inf-overlay-marker (copy-marker end))
     (with-current-buffer ensime-inf-buffer-name
+      (goto-char (point-max))
       (comint-send-string nil ":paste\n")
       (comint-send-string nil reg)
       (comint-send-string nil "\n")
@@ -247,13 +252,15 @@ the current project's dependencies. Returns list of form (cmd [arg]*)"
   (with-current-buffer ensime-inf-buffer-name
     (save-excursion
       (goto-char (point-max))
-      (next-line -1)
+      (next-line -2)
       (end-of-line)
       (let ((end (point)))
-        (search-backward "Exiting paste mode, now interpreting.")
-        (next-line)
-        (beginning-of-line)
-        (buffer-substring-no-properties (point) end)))))
+        (if (search-backward "Exiting paste mode, now interpreting." nil t)
+            (progn
+              (next-line 2)
+              (beginning-of-line)
+              (buffer-substring-no-properties (point) end))
+          nil)))))
 
 (defun ensime-inf-eval-definition ()
   "Send the current 'definition' to the Scala interpreter.
@@ -337,7 +344,16 @@ the current project's dependencies. Returns list of form (cmd [arg]*)"
   ;; Ideally we'd base this on comint's decision on whether it's seen
   ;; a prompt, but that decision hasn't been made by this stage
   (unless (or (string-equal str "") (string-equal "\n" (substring str -1)))
-    (ensime-event-sig :inf-repl-ready))
+    (ensime-event-sig :inf-repl-ready)
+    (when (markerp  ensime-inf-overlay-marker)
+      (with-current-buffer (buffer-name (marker-buffer ensime-inf-overlay-marker))
+        (let ((eval-result (ensime-inf-eval-result)))
+          (when eval-result
+            (ensime--make-result-overlay
+                (format "%S" eval-result)
+              :where (marker-position ensime-inf-overlay-marker)
+              :duration 'command)
+            (setq ensime-inf-overlay-marker nil))))))
   (ensime-inf-highlight-stack-traces
    comint-last-output-start
    (process-mark (get-buffer-process (current-buffer)))))

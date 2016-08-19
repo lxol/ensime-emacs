@@ -1860,14 +1860,38 @@
       (proj src-files)
       (ensime-assert (string= (ensime-inf-eval-result)
                               (ensime-test-concat-lines
-                               ""
                                "defined trait Foo"
-                               "defined object Foo"
-                               "")))
+                               "defined object Foo")))
       (ensime-inf-quit-interpreter)))
     ((:inf-repl-exit)
      (ensime-test-with-proj
       (proj src-files)
+      (ensime-test-cleanup proj))))
+
+   (ensime-async-test
+    "Test ensime--make-result-overlay."
+    (let* ((proj (ensime-create-tmp-project
+                  `((:name
+                     "hello_world.scala"
+                     :contents ,(ensime-test-concat-lines
+                                 "sealed trait Foo"
+                                 "object Foo {"
+                                 ""
+                                 ""
+                                 ""
+                                 "}"
+                                 ""))))))
+      (ensime-test-init-proj proj))
+    ((:connected))
+    ((:compiler-ready :full-typecheck-finished)
+     (ensime-test-with-proj
+      (proj src-files)
+      (find-file (car src-files))
+      (ensime--make-result-overlay
+          (format "%S" "overlay")
+        :where (point-min)
+        :duration 'command)
+      (ensime-assert (overlayp (car(overlays-at (point-min)))))
       (ensime-test-cleanup proj))))
 
    (ensime-async-test
