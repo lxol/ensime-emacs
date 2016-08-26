@@ -80,6 +80,17 @@
     (insert contents))
   file-name)
 
+(defun ensime-test-find-overlays-specifying (prop)
+  "Return a list of overlays that specify property PROP in buffer."
+  (let ((overlays (overlays-in (point-min) (point-max)))
+        found)
+    (while overlays
+      (let ((overlay (car overlays)))
+        (if (overlay-get overlay prop)
+            (setq found (cons overlay found))))
+      (setq overlays (cdr overlays)))
+    found))
+
 (defvar ensime--test-scala-version
   (or (getenv "SCALA_VERSION") "2.11.8"))
 
@@ -1892,6 +1903,66 @@
         :where (point-min)
         :duration 'command)
       (ensime-assert (overlayp (car(overlays-at (point-min)))))
+      (ensime-test-cleanup proj))))
+
+   (ensime-async-test
+    "Test ensime-type-at-point overlay."
+    (let* ((proj (ensime-create-tmp-project
+                  `((:name
+                     "hello_world.scala"
+                     :contents ,(ensime-test-concat-lines
+                                 "sealed trait Foo"
+                                 "object Foo {"
+                                 ""
+                                 "  val a /*1*/ = 1"
+                                 ""
+                                 "}"
+                                 ""))))))
+      (ensime-test-init-proj proj))
+    ((:connected))
+    ((:compiler-ready :full-typecheck-finished)
+     (ensime-test-with-proj
+      (proj src-files)
+      (find-file (car src-files))
+      (ensime-test-eat-label "1")
+      (ensime-type-at-point '(16))
+      (let ((overlays (ensime-test-find-overlays-specifying 'after-string)))
+        (ensime-assert (eq (length overlays) 1))
+                (ensime-assert
+         (string-match "Int" (overlay-get (car overlays)
+                                                         'after-string))))
+      (ensime-test-cleanup proj))))
+
+   (ensime-async-test
+    "Test ensime-print-errors-at-point overlay."
+    (let* ((proj (ensime-create-tmp-project
+                  `((:name
+                     "hello_world.scala"
+                     :contents ,(ensime-test-concat-lines
+                                 "sealed trait Foo"
+                                 "object Foo {"
+                                 ""
+                                 "  val a = /*1*/b"
+                                 ""
+                                 "}"
+                                 ""))))))
+      (ensime-test-init-proj proj))
+    ((:connected))
+    ((:compiler-ready :full-typecheck-finished :notes-added)
+     (ensime-test-with-proj
+      (proj src-files)
+      (find-file (car src-files))
+      (ensime-test-eat-label "1")
+      (ensime-print-errors-at-point '(16))))
+    ((:errors-at-point-printed)
+     (ensime-test-with-proj
+      (proj src-files)
+      (find-file (car src-files))
+      (let ((overlays (ensime-test-find-overlays-specifying 'after-string)))
+        (ensime-assert (eq (length overlays) 1))
+        (ensime-assert
+         (string-match "not found: value b" (overlay-get (car overlays)
+                                                         'after-string))))
       (ensime-test-cleanup proj))))
 
    (ensime-async-test
